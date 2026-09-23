@@ -31,10 +31,12 @@ class ApiKeyUpdateSerializer(serializers.ModelSerializer):
 
 
 class NoteSerializer(serializers.ModelSerializer):
+    shared_with = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+
     class Meta:
         model = Note
-        fields = ['id', 'title', 'content', 'status', 'owner', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'status', 'owner', 'created_at', 'updated_at']
+        fields = ['id', 'title', 'content', 'status', 'owner', 'shared_with', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'status', 'owner', 'shared_with', 'created_at', 'updated_at']
 
     def validate_title(self, value):
         if not value or not value.strip():

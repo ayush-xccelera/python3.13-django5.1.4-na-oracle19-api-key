@@ -87,6 +87,124 @@ def test_notes_missing_api_key_rejected(api_client):
 
 
 @pytest.mark.django_db
+def test_share_note_success(api_client, admin_headers, auth_headers):
+    create_resp = api_client.post(
+        '/api/v1/notes/', {'title': 'Shared', 'content': 'c'}, format='json', **auth_headers,
+    )
+    note_id = create_resp.json()['id']
+
+    other_resp = api_client.post('/api/v1/api-keys/', {'name': 'Other'}, format='json', **admin_headers)
+    other_id = other_resp.json()['id']
+
+    resp = api_client.post(
+        f'/api/v1/notes/{note_id}/share/', {'client_id': other_id}, format='json', **auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()['shared_with'] == [other_id]
+
+
+@pytest.mark.django_db
+def test_share_note_with_self_rejected(api_client, auth_headers, api_key):
+    _, owner_id = api_key
+    create_resp = api_client.post(
+        '/api/v1/notes/', {'title': 'Self', 'content': 'c'}, format='json', **auth_headers,
+    )
+    note_id = create_resp.json()['id']
+
+    resp = api_client.post(
+        f'/api/v1/notes/{note_id}/share/', {'client_id': owner_id}, format='json', **auth_headers,
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_share_note_missing_client_404(api_client, auth_headers):
+    create_resp = api_client.post(
+        '/api/v1/notes/', {'title': 'X', 'content': 'c'}, format='json', **auth_headers,
+    )
+    note_id = create_resp.json()['id']
+
+    resp = api_client.post(
+        f'/api/v1/notes/{note_id}/share/', {'client_id': 999999}, format='json', **auth_headers,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.django_db
+def test_share_missing_note_404(api_client, admin_headers, auth_headers):
+    other_resp = api_client.post('/api/v1/api-keys/', {'name': 'Other2'}, format='json', **admin_headers)
+    other_id = other_resp.json()['id']
+
+    resp = api_client.post(
+        f'/api/v1/notes/999999/share/', {'client_id': other_id}, format='json', **auth_headers,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.django_db
+def test_shared_client_can_retrieve_but_not_modify(api_client, admin_headers, auth_headers):
+    create_resp = api_client.post(
+        '/api/v1/notes/', {'title': 'View', 'content': 'c'}, format='json', **auth_headers,
+    )
+    note_id = create_resp.json()['id']
+
+    other_resp = api_client.post('/api/v1/api-keys/', {'name': 'Viewer'}, format='json', **admin_headers)
+    other_key = other_resp.json()['key']
+    other_id = other_resp.json()['id']
+    other_headers = {'HTTP_X_API_KEY': other_key}
+
+    api_client.post(f'/api/v1/notes/{note_id}/share/', {'client_id': other_id}, format='json', **auth_headers)
+
+    get_resp = api_client.get(f'/api/v1/notes/{note_id}/', **other_headers)
+    assert get_resp.status_code == 200
+
+    put_resp = api_client.put(
+        f'/api/v1/notes/{note_id}/', {'title': 'Hacked', 'content': 'x'}, format='json', **other_headers,
+    )
+    assert put_resp.status_code == 404
+
+
+@pytest.mark.django_db
+def test_shared_with_me_list(api_client, admin_headers, auth_headers):
+    create_resp = api_client.post(
+        '/api/v1/notes/', {'title': 'SharedWithMe', 'content': 'c'}, format='json', **auth_headers,
+    )
+    note_id = create_resp.json()['id']
+
+    viewer_resp = api_client.post('/api/v1/api-keys/', {'name': 'Viewer2'}, format='json', **admin_headers)
+    viewer_key = viewer_resp.json()['key']
+    viewer_id = viewer_resp.json()['id']
+    viewer_headers = {'HTTP_X_API_KEY': viewer_key}
+
+    api_client.post(f'/api/v1/notes/{note_id}/share/', {'client_id': viewer_id}, format='json', **auth_headers)
+
+    resp = api_client.get('/api/v1/notes/shared-with-me/', **viewer_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert 'results' in data
+    assert any(n['id'] == note_id for n in data['results'])
+
+
+@pytest.mark.django_db
+def test_unshare_note(api_client, admin_headers, auth_headers):
+    create_resp = api_client.post(
+        '/api/v1/notes/', {'title': 'Revoke', 'content': 'c'}, format='json', **auth_headers,
+    )
+    note_id = create_resp.json()['id']
+
+    other_resp = api_client.post('/api/v1/api-keys/', {'name': 'Revokee'}, format='json', **admin_headers)
+    other_id = other_resp.json()['id']
+
+    api_client.post(f'/api/v1/notes/{note_id}/share/', {'client_id': other_id}, format='json', **auth_headers)
+
+    resp = api_client.delete(f'/api/v1/notes/{note_id}/share/{other_id}', **auth_headers)
+    assert resp.status_code == 204
+
+    resp2 = api_client.delete(f'/api/v1/notes/{note_id}/share/{other_id}', **auth_headers)
+    assert resp2.status_code == 404
+
+
+@pytest.mark.django_db
 def test_notes_owner_isolation(api_client, admin_headers, auth_headers):
     # Create a second client and note; the first client should not see it.
     create_resp = api_client.post('/api/v1/api-keys/', {'name': 'Other Client'}, format='json', **admin_headers)

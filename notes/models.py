@@ -43,6 +43,9 @@ class Note(models.Model):
     content = models.TextField()
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
     owner = models.ForeignKey(ApiKey, on_delete=models.CASCADE, related_name='notes')
+    shared_with = models.ManyToManyField(
+        ApiKey, related_name='shared_notes', blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 from rest_framework import status, viewsets, mixins
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError, NotFound, PermissionDenied
@@ -132,3 +133,60 @@ class NoteViewSet(viewsets.ModelViewSet):
         instance.status = Note.STATUS_ACTIVE
         instance.save(update_fields=['status', 'updated_at'])
         return Response(NoteSerializer(instance).data)
+
+    def retrieve(self, request, *args, **kwargs):
+        owner = self.request.auth
+        pk = self.kwargs['pk']
+        instance = Note.objects.filter(pk=pk).filter(
+            Q(owner=owner) | Q(shared_with=owner)
+        ).first()
+        if instance is None:
+            raise NotFound('Note not found.')
+        return Response(NoteSerializer(instance).data)
+
+    @action(detail=False, methods=['get'], url_path='shared-with-me')
+    def shared_with_me(self, request, *args, **kwargs):
+        owner = self.request.auth
+        qs = Note.objects.filter(shared_with=owner).order_by('-created_at')
+        page = self.paginate_queryset(qs)
+        serializer = NoteSerializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='share')
+    def share(self, request, pk=None):
+        note = self.get_object()
+
+        client_id = request.data.get('client_id')
+        if client_id in (None, ''):
+            raise ValidationError({'client_id': 'This field is required.'})
+        try:
+            client_id = int(client_id)
+        except (TypeError, ValueError):
+            raise ValidationError({'client_id': 'Must be a numeric client id.'})
+
+        if client_id == note.owner_id:
+            raise ValidationError('A note cannot be shared with its own owner.')
+
+        target = ApiKey.objects.filter(pk=client_id).first()
+        if target is None:
+            raise NotFound('Client not found.')
+
+        note.shared_with.add(target)
+        return Response(NoteSerializer(note).data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True, methods=['delete'],
+        url_path=r'share/(?P<client_id>[^/.]+)',
+    )
+    def unshare(self, request, pk=None, client_id=None):
+        note = self.get_object()
+
+        target = ApiKey.objects.filter(pk=client_id).first()
+        if target is None:
+            raise NotFound('Client not found.')
+
+        if not note.shared_with.filter(pk=target.pk).exists():
+            raise NotFound('Client does not have access to this note.')
+
+        note.shared_with.remove(target)
+        return Response(status=status.HTTP_204_NO_CONTENT)
