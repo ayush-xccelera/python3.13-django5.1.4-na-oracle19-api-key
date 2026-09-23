@@ -1,0 +1,12 @@
+django==5.1.4
+djangorestframework
+djangorestframework-simplejwt
+django-cors-headers
+drf-spectacular
+oracledb
+python-dotenv
+gunicorn
+pytest
+pytest-django
+openpyxl
+python-docx
